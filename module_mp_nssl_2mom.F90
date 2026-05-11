@@ -181,7 +181,7 @@ MODULE module_mp_nssl_2mom
   public nssl_2mom_init_const
   public calc_eff_radius
   public calcnfromq
-  public nssl_qtodbz
+  public nssl_qtodbz, nssl_qtodbz1d
 
   private gamma_sp,gamxinf,GAML02, GAML02d300, GAML02d500, fqvs, fqis
   private gamma_dp, gamxinfdp, gamma_dpr
@@ -8801,40 +8801,9 @@ END SUBROUTINE nssl_2mom_driver
 ! Code obtained from Lou Wicker, 30 August 2004
 ! Modified by David Dowell, 7 September 2004, after input from Matt Gilmore
 !
-!
-! 2005.07.18:  (erm) Added option for Ferrier (1994) version of dBZ 
-!             calculation, which uses equivalent melted diameter.
-!             Here it is assumed that all ice particles are dry, which 
-!             may not be realistic in that regard.
-!
-!             Also added dBZ calculation for 10-ice and 2-moment
+! 5/2026: Adapted for MPAS for NSSL-MP only (ERM)
 !
 !--------------------------------------------------------------------------
-! INPUTS:
-!
-!           nc:     number of hydrometeor categories
-!
-!           q(1):   rainwater mixing ratio (kg/kg) from model
-!           q(2):   ice crystal mixing ratio (kg/kg) from model
-!           q(3):   snow mixing ratio (kg/kg) from model
-!           q(4):   graupel/hail mixing ratio (kg/kg) from model
-!
-!           pb:     Exner function (total or base-state pressure)
-!           tb:     potential temperature (K)
-!
-!           cnor:   slope intercept of rainwater
-!           rho_qr: density of rainwater
-!
-!           cnos:   slope intercept of snow
-!           rho_qs: density of snow
-!
-!           cnoh:   slope intercept of hail
-!           rho_qh: density of hail
-!
-! OUTPUTS:
-!
-!           qtodbz: reflectivity (dBZ)
-!
 !-----------------------------------------------------------------------
       REAL FUNCTION nssl_qtodbz(             &
                               qc, qr, qi, qs, qh, qhl, ccw, crw, cci, csw, chw, chl,  &
@@ -8943,6 +8912,121 @@ END SUBROUTINE nssl_2mom_driver
 
       RETURN
       END FUNCTION nssl_qtodbz
+
+!
+! ##############################################################################
+!
+
+! #####################################################################
+! #####################################################################
+
+
+!-----------------------------------------------------------------------
+!
+!     ##################################################################
+!     ######                                                      ######
+!     ######                SUBROUTINE QTODBZ1D                   ######
+!     ######                                                      ######
+!     ##################################################################
+!
+! A column version of qtodbz
+!
+! Computes effective radar-reflectivity factor corresponding to the model
+! hydrometeor variables.
+!
+!
+!
+!-----------------------------------------------------------------------
+      subroutine nssl_qtodbz1d( dbz_in, nz,           &
+                              qc, qr, qi, qs, qh, qhl, ccw, crw, cci, csw, chw, chl,  &
+                              vhw, vhl, zrw, zhw, zhl, pb, tb, rho_air  )
+
+!      USE INDEX_MODULE
+!      USE MICRO_MODULE, only : idbzci, iuseferrier
+
+      implicit none
+
+!---- Passed Variables
+
+      integer, intent(in) :: nz
+      real, intent(inout) :: dbz_in(nz)
+      real, intent(in) :: qc(nz), qr(nz), qi(nz), qs(nz), qh(nz), qhl(nz), ccw(nz),  &
+                          crw(nz), cci(nz), csw(nz), chw(nz), chl(nz),  &
+                          vhw(nz), vhl(nz), zrw(nz), zhw(nz), zhl(nz)
+      real, intent(in) :: pb(nz), tb(nz) ! exner pi, theta
+      real, intent(in), optional :: rho_air(nz)
+!      real cno(3:50)
+!      real cnoh, cnos, cnor, rho_qh, rho_qs, rho_qr
+!      integer           :: ipconc
+!---  Local Variables
+
+      real :: mindbz = 0.0
+      integer nx,ny,nor, k, kediagloc
+      parameter ( nx = 1, ny = 1, nor = 0)
+      real z1d(1,4), gz(1), den(nz), temp(nz)
+      real :: an(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor,na)
+      real :: dn(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor)
+      real :: temk(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor)
+      real :: dbz(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor)
+
+!-----------------------------------------------------------------------
+
+
+
+      temp(1:nz) = tb(1:nz)*pb(1:nz)
+
+!      IF ( microp(1:5) .eq. 'ICE10' .or. microp(1:1) .eq. 'Z' .or. microp .eq. 'WARMZIEG' ) THEN
+!      CALL setmicro(cnoh,rho_qh,cnor,rho_qr,cnos,rho_qs)
+
+      z1d(:,:) = 1.0
+      gz(1) = 1.0
+      an(:,:,:,:) = 0.0
+      IF ( present( rho_air ) ) THEN
+        den(1:nz) = rho_air(1:nz)
+        dn(1,1,1:nz) = rho_air(1:nz)
+      ELSE 
+      den(1:nz) = 1.0e5*pb(1:nz)**2.509/(287.04*tb(1:nz))
+      ENDIF
+      dn(1,1,1:nz) = den(1:nz)
+      temk(1,1,1:nz) = temp(1:nz)
+
+      DO k = 1,nz
+        an(1,1,k,lc) = qc(k)
+        an(1,1,k,lr) = qr(k)
+        an(1,1,k,li) = qi(k)
+        an(1,1,k,ls) = qs(k)
+        an(1,1,k,lh) = qh(k)
+        IF ( lhl > 1 ) an(1,1,k,lhl) = qhl(k)
+        an(1,1,k,lnc) = ccw(k)
+        an(1,1,k,lnr) = crw(k)
+        an(1,1,k,lni) = cci(k)
+        an(1,1,k,lns) = csw(k)
+        an(1,1,k,lnh) = chw(k)
+        IF ( lnhl > 1 ) an(1,1,k,lnhl) = chl(k)
+        IF ( lvh > 1 ) an(1,1,k,lvh) = vhw(k)
+        IF ( lvhl > 1 ) an(1,1,k,lvhl) = vhl(k)
+        IF ( lzr > 1 ) an(1,1,k,lzr) = zrw(k)
+        IF ( lzh > 1 ) an(1,1,k,lzh) = zhw(k)
+        IF ( lzhl > 1 ) an(1,1,k,lzhl) = zhl(k)
+      ENDDO
+
+      call calcnfromq(nx,ny,nz,an,na,nor,nor,dn)
+
+!      write(*,*) 'qtodbz: den,temp = ',den,temp
+
+! assume ipconc = 0 for now....
+! assume print unit=6
+      kediagloc = nz
+      call radardd02(nx,ny,nz,nor,na,an,temk,         &
+     &    dbz,dn,1,cnoh,rho_qh,ipconc,kediagloc,0, zdbz_start=1,zdbz_end=nz)
+!           call radardd02(nx,ny,nz,nor,na,an,temk,
+!                  dbz,dn, 1, cnoh,rho_qh,ipconc, 6, microp, 0, 0, vzf)
+
+!         IF ( dbz .gt. 1.0 ) write(*,*) 'qtodbz: dbz = ', dbz
+         dbz_in(1:nz) = dbz(1,1,1:nz)
+
+      RETURN
+      END subroutine nssl_qtodbz1d
 
 !
 ! ##############################################################################
