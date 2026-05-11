@@ -181,6 +181,7 @@ MODULE module_mp_nssl_2mom
   public nssl_2mom_init_const
   public calc_eff_radius
   public calcnfromq
+  public nssl_qtodbz
 
   private gamma_sp,gamxinf,GAML02, GAML02d300, GAML02d500, fqvs, fqis
   private gamma_dp, gamxinfdp, gamma_dpr
@@ -8773,6 +8774,179 @@ END SUBROUTINE nssl_2mom_driver
 ! #####################################################################
 ! #####################################################################
 
+
+!-----------------------------------------------------------------------
+!
+!     ##################################################################
+!     ######                                                      ######
+!     ######                REAL FUNCTION QTODBZ                  ######
+!     ######                                                      ######
+!     ##################################################################
+!
+! Computes effective radar-reflectivity factor corresponding to the model
+! hydrometeor variables.
+!
+!
+! Units are MKS, and for most accurate results, make sure that the
+! number concentrations and densities of rain, snow and hail are the
+! same as the model used in producing the fields.
+!
+! To be fully consistent with the microphysics, hail/graupel particle
+! conditions (wet or dry) would need to be passed to this routine.  This
+! is because hail/graupel can be wet at temperatures colder than freezing.
+! Instead, here we assume that all particles are dry at T<0.  (M. Gilmore)
+!
+!--------------------------------------------------------------------------
+!
+! Code obtained from Lou Wicker, 30 August 2004
+! Modified by David Dowell, 7 September 2004, after input from Matt Gilmore
+!
+!
+! 2005.07.18:  (erm) Added option for Ferrier (1994) version of dBZ 
+!             calculation, which uses equivalent melted diameter.
+!             Here it is assumed that all ice particles are dry, which 
+!             may not be realistic in that regard.
+!
+!             Also added dBZ calculation for 10-ice and 2-moment
+!
+!--------------------------------------------------------------------------
+! INPUTS:
+!
+!           nc:     number of hydrometeor categories
+!
+!           q(1):   rainwater mixing ratio (kg/kg) from model
+!           q(2):   ice crystal mixing ratio (kg/kg) from model
+!           q(3):   snow mixing ratio (kg/kg) from model
+!           q(4):   graupel/hail mixing ratio (kg/kg) from model
+!
+!           pb:     Exner function (total or base-state pressure)
+!           tb:     potential temperature (K)
+!
+!           cnor:   slope intercept of rainwater
+!           rho_qr: density of rainwater
+!
+!           cnos:   slope intercept of snow
+!           rho_qs: density of snow
+!
+!           cnoh:   slope intercept of hail
+!           rho_qh: density of hail
+!
+! OUTPUTS:
+!
+!           qtodbz: reflectivity (dBZ)
+!
+!-----------------------------------------------------------------------
+      REAL FUNCTION nssl_qtodbz(             &
+                              qc, qr, qi, qs, qh, qhl, ccw, crw, cci, csw, chw, chl,  &
+                              vhw, vhl, zrw, zhw, zhl, pb, tb, rho_air  )
+
+!      USE INDEX_MODULE
+!      USE MICRO_MODULE, only : idbzci, iuseferrier
+
+      implicit none
+
+!---- Passed Variables
+
+      integer nc
+      real, intent(in) :: qc, qr, qi, qs, qh, qhl, ccw, crw, cci, csw, chw, chl,  &
+                              vhw, vhl, zrw, zhw, zhl
+      real, intent(in) :: pb, tb ! exner pi, theta
+      real, intent(in), optional :: rho_air
+!      real cno(3:50)
+!      real cnoh, cnos, cnor, rho_qh, rho_qs, rho_qr
+      real :: mindbz = 0.0
+!      integer           :: ipconc
+!---  Local Variables
+
+!      integer lv,lc,lr,li,lir,ls
+!      integer lgl,lgm,lgh,lf,lh
+!      integer lip,lhl,lhab
+      
+
+!      real :: cnoh = 4.e5
+!      logical ice10
+      
+!      integer iuseferrier  ! set = 1 to use alternate dBZ based on Ferrier 1994
+                           ! NOTE that snow is treated as always dry.  Might want to
+                           ! change that....
+!      integer idbzci       ! set = 1 to include dBZ contribution of cloud ice 
+                           ! in 3ice (Heymsfield JAS, 1977).  Used for 10-ice by default
+!      parameter ( iuseferrier = 1, idbzci = 0 )
+
+      integer nx,ny,nz,nor, k, kediagloc
+      parameter ( nx = 1, ny = 1, nz = 1, nor = 0)
+      real z1d(1,4), gz(1), den, temp
+      real :: an(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor,na)
+      real :: dn(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor)
+      real :: temk(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor)
+      real :: dbz(-nor+1:nx+nor,-nor+1:ny+nor,-nor+1:nz+nor)
+
+!-----------------------------------------------------------------------
+
+
+
+      temp = tb*pb
+
+!      IF ( microp(1:5) .eq. 'ICE10' .or. microp(1:1) .eq. 'Z' .or. microp .eq. 'WARMZIEG' ) THEN
+!      CALL setmicro(cnoh,rho_qh,cnor,rho_qr,cnos,rho_qs)
+      
+      z1d(:,:) = 1.0
+      gz(1) = 1.0
+      an(:,:,:,:) = 0.0
+      IF ( present( rho_air ) ) THEN
+        den = rho_air
+        dn = rho_air
+      ELSE 
+      den = 1.0e5*pb**2.509/(287.04*tb)
+      ENDIF
+      dn = den
+      temk = temp
+      
+!      DO k = 1,2*lqmx
+        an(1,1,1,lc) = qc
+        an(1,1,1,lr) = qr
+        an(1,1,1,li) = qi
+        an(1,1,1,ls) = qs
+        an(1,1,1,lh) = qh
+        IF ( lhl > 1 ) an(1,1,1,lhl) = qhl
+        an(1,1,1,lnc) = ccw
+        an(1,1,1,lnr) = crw
+        an(1,1,1,lni) = cci
+        an(1,1,1,lns) = csw
+        an(1,1,1,lnh) = chw
+        IF ( lnhl > 1 ) an(1,1,1,lnhl) = chl
+        IF ( lvh > 1 ) an(1,1,1,lvh) = vhw
+        IF ( lvhl > 1 ) an(1,1,1,lvhl) = vhl
+        IF ( lzr > 1 ) an(1,1,1,lzr) = zrw
+        IF ( lzh > 1 ) an(1,1,1,lzh) = zhw
+        IF ( lzhl > 1 ) an(1,1,1,lzhl) = zhl
+!      ENDDO
+      
+      call calcnfromq(nx,ny,nz,an,na,nor,nor,dn)
+
+!      write(*,*) 'qtodbz: den,temp = ',den,temp
+      
+! assume ipconc = 0 for now....
+! assume print unit=6
+      kediagloc = 1
+      call radardd02(nx,ny,nz,nor,na,an,temk,         &
+     &    dbz,dn,1,cnoh,rho_qh,ipconc,kediagloc,0, zdbz_start=1,zdbz_end=1)
+!           call radardd02(nx,ny,nz,nor,na,an,temk,
+!                  dbz,dn, 1, cnoh,rho_qh,ipconc, 6, microp, 0, 0, vzf)
+         
+!         IF ( dbz .gt. 1.0 ) write(*,*) 'qtodbz: dbz = ', dbz
+         nssl_qtodbz = Max( dbz(1,1,1), mindbz )
+         
+       RETURN
+      
+
+
+      RETURN
+      END FUNCTION nssl_qtodbz
+
+!
+! ##############################################################################
+!
 
 ! #####################################################################
 ! #####################################################################
