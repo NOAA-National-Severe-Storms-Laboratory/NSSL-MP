@@ -14,8 +14,10 @@ Some background information and usage tips for the NSSL microphysics scheme.
  The advection scheme in MPAS can result in noisy values at the edges of reflectivity cores. This is because the errors in the moments for number and mass are mismatched and can end up with small amounts of large hydrometeors. Some reduction can be achieved by setting config_coef_3rd_order to a value closer to 1 (e.g., 0.9 vs. default value of 0.25) to reduce the 4th-order component. 
 ### WRF:  
    Best results are attained using WENO (Weighted Essentially Non-Oscillatory) scalar advection option. This helps to limit oscillations at the edges of precipitation regions (i.e., sharp gradient), which in turns helps to prevent mismatches of moments that can show up as noisy reflectivity values.
+```
    moist_adv_opt  = 4,
    scalar_adv_opt = 3,
+```
  The monotonic option (2) is less effective, but better than the default positive definite option (1)
 
 
@@ -32,60 +34,60 @@ The default NSSL scheme (2-moment) has the separate hail species turned with pre
 To select NSSL in the physics namelist:
 
 ### MPAS:
+```
   config_microp_scheme = 'mp_nssl2m' 
+```
 ### WRF: 
+```
   mp_physics = 18 
-  
+```
   The legacy options (17,19,21,22, see below) still behave as before (for now), but going
   forward one should use mp_physics=18 with modifier flags. 2025 Update, however,
   sets nssl_ccn_on=1 by default (keeps supersaturation much more reasonable; except for single moment).
 
 ### UFS-FV3: 
+```
   imp_physics = 17
-  
   nwat = 7 ! 7 with hail, but 6 if hail is deactivated
+```
 
 ## Option flags/parameters:
 
 ### MPAS:
+```
  config_nssl_3moment : (logical) default value of .false., setting to .true. adds 6th moment for rain, graupel (i.e., 3-moment ) and hail (Only needed for turning  3-moment on)
- 
  config_nssl_ccn_on : (logical) predicted CCN concentration: default is on (.true.) 
- 
  config_nssl_hail_on : (logical) If not set explicitly, it is set automatically to true. Set to false to run with graupel only (non-severe deep convection)
+```
 
 ### UFS-FV3:
+```
  nssl_3moment : (logical) default value of .false., setting to .true. adds 6th moment for rain, graupel (i.e., 3-moment ) and hail (Only needed for turning  3-moment on)
- 
  nssl_ccn_on : (logical) predicted CCN concentration: default is on (.true.) 
- 
  nssl_hail_on : (logical) If not set explicitly, it is set automatically to true. Set to false to run with graupel only (non-severe deep convection)
+```
 
 ### WRF:
- 
+```
  nssl_3moment : (integer) default value of 0, setting to 1 adds 6th moment for rain, graupel (i.e., 3-moment ) and hail (Only needed for turning  3-moment on)
- 
  nssl_ccn_on : (integer) predicted CCN concentration: default is on (=1) 
- 
  nssl_hail_on : (integer) If not set explicitly, it is set automatically to 1. Set to 0 to run with graupel only (non-severe deep convection)
- 
  nssl_density_on : (integer) If not set explicitly, it is set automatically to 1. Set to 0 to turn off graupel/hail density prediction and use fixed values
-
+```
 
   Note: Graupel/hail density prediction is currently always turned on, and the CCN category is always treated as the number of *activated* CCN.
 
 ### Other namelist options (MPAS, WRF/UFS-FV3) and default values (also "physics" namelist)
    
+```
    config_nssl_alphar/ nssl_alphar  = 0.    ! (real) PSD shape parameter for rain (2-moment) (not included in WRF as of 4.7.1 but available in nssl_mp_params namelist)
-   
    config_nssl_alphah/ nssl_alphah  = 0.    ! (real) PSD shape parameter for graupel (2-moment)
-   
    config_nssl_alphahl / nssl_alphahl = 1.    ! (real) PSD shape parameter for hail (2-moment)
-   
    config_nssl_ehw0 / nssl_ehw0    = 0.9   ! (real) Maximum graupel-droplet collection efficiency
-   
    config_nssl_ehlw0 / nssl_ehlw0   = 0.9   ! (real) Maximum hail-droplet collection efficiency
+```
 
+```
    config_nssl_cccn / nssl_cccn  - (real) Initial background concentration of cloud condensation 
                        nuclei (per m^3 at sea level)
                    0.25e+9 maritime
@@ -101,6 +103,7 @@ To select NSSL in the physics namelist:
                  will be less than nssl_cccn because of the well-mixed assumption, 
                  so if a target Nc is desired, set nssl_cccn higher by a factor of 
                  1.225/(air density at cloud base).
+```
 
 ## More background
 
