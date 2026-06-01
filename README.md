@@ -9,9 +9,11 @@ The Makefile is used for MPAS, and mp_nssl.meta is for CCPP
 Some background information and usage tips for the NSSL microphysics scheme.
 
 ## NOTES ON ADVECTION: 
+
 ### MPAS: 
  The advection scheme in MPAS can result in noisy values at the edges of reflectivity cores. This is because the errors in the moments for number and mass are mismatched and can end up with small amounts of large hydrometeors. Some reduction can be achieved by setting config_coef_3rd_order to a value closer to 1 (e.g., 0.9 vs. default value of 0.25) to reduce the 4th-order component. 
-### WRF:  Best results are attained using WENO (Weighted Essentially Non-Oscillatory) scalar advection option. This helps to limit oscillations at the edges of precipitation regions (i.e., sharp gradient), which in turns helps to prevent mismatches of moments that can show up as noisy reflectivity values.
+### WRF:  
+   Best results are attained using WENO (Weighted Essentially Non-Oscillatory) scalar advection option. This helps to limit oscillations at the edges of precipitation regions (i.e., sharp gradient), which in turns helps to prevent mismatches of moments that can show up as noisy reflectivity values.
    moist_adv_opt  = 4,
    scalar_adv_opt = 3,
  The monotonic option (2) is less effective, but better than the default positive definite option (1)
@@ -33,44 +35,58 @@ To select NSSL in the physics namelist:
   config_microp_scheme = 'mp_nssl2m' 
 ### WRF: 
   mp_physics = 18 
+  
   The legacy options (17,19,21,22, see below) still behave as before (for now), but going
   forward one should use mp_physics=18 with modifier flags. 2025 Update, however,
   sets nssl_ccn_on=1 by default (keeps supersaturation much more reasonable; except for single moment).
 
 ### UFS-FV3: 
   imp_physics = 17
+  
   nwat = 7 ! 7 with hail, but 6 if hail is deactivated
 
 ## Option flags/parameters:
 
 ### MPAS:
  config_nssl_3moment : (logical) default value of .false., setting to .true. adds 6th moment for rain, graupel (i.e., 3-moment ) and hail (Only needed for turning  3-moment on)
+ 
  config_nssl_ccn_on : (logical) predicted CCN concentration: default is on (.true.) 
+ 
  config_nssl_hail_on : (logical) If not set explicitly, it is set automatically to true. Set to false to run with graupel only (non-severe deep convection)
 
 ### UFS-FV3:
  nssl_3moment : (logical) default value of .false., setting to .true. adds 6th moment for rain, graupel (i.e., 3-moment ) and hail (Only needed for turning  3-moment on)
+ 
  nssl_ccn_on : (logical) predicted CCN concentration: default is on (.true.) 
+ 
  nssl_hail_on : (logical) If not set explicitly, it is set automatically to true. Set to false to run with graupel only (non-severe deep convection)
 
 ### WRF:
+ 
  nssl_3moment : (integer) default value of 0, setting to 1 adds 6th moment for rain, graupel (i.e., 3-moment ) and hail (Only needed for turning  3-moment on)
+ 
  nssl_ccn_on : (integer) predicted CCN concentration: default is on (=1) 
+ 
  nssl_hail_on : (integer) If not set explicitly, it is set automatically to 1. Set to 0 to run with graupel only (non-severe deep convection)
+ 
  nssl_density_on : (integer) If not set explicitly, it is set automatically to 1. Set to 0 to turn off graupel/hail density prediction and use fixed values
 
 
   Note: Graupel/hail density prediction is currently always turned on, and the CCN category is always treated as the number of *activated* CCN.
 
- Other namelist options (MPAS, WRF/UFS-FV3) and default values (also "physics" namelist)
+### Other namelist options (MPAS, WRF/UFS-FV3) and default values (also "physics" namelist)
+   
    config_nssl_alphar/ nssl_alphar  = 0.    ! (real) PSD shape parameter for rain (2-moment) (not included in WRF as of 4.7.1 but available in nssl_mp_params namelist)
+   
    config_nssl_alphah/ nssl_alphah  = 0.    ! (real) PSD shape parameter for graupel (2-moment)
+   
    config_nssl_alphahl / nssl_alphahl = 1.    ! (real) PSD shape parameter for hail (2-moment)
+   
    config_nssl_ehw0 / nssl_ehw0    = 0.9   ! (real) Maximum graupel-droplet collection efficiency
+   
    config_nssl_ehlw0 / nssl_ehlw0   = 0.9   ! (real) Maximum hail-droplet collection efficiency
 
-
-  config_nssl_cccn / nssl_cccn  - (real) Initial background concentration of cloud condensation 
+   config_nssl_cccn / nssl_cccn  - (real) Initial background concentration of cloud condensation 
                        nuclei (per m^3 at sea level)
                    0.25e+9 maritime
                    0.5e+9 "low-med" continental
@@ -86,6 +102,8 @@ To select NSSL in the physics namelist:
                  so if a target Nc is desired, set nssl_cccn higher by a factor of 
                  1.225/(air density at cloud base).
 
+## More background
+
 The graupel and hail particle densities are also calculated by predicting the total particle volume. The graupel category therefore emulates a range of characteristics from high-density frozen drops (includes small hail) to low-density graupel (from rimed ice crystals/snow) in its size and density spectrum. The hail category is designed to simulate larger hail sizes. Hail is only produced from higher-density large graupel that is actively riming (esp. in wet growth).
 
 Hydrometeor size distributions are assumed to follow a gamma functional form. Microphysical processes include cloud droplet and cloud ice nucleation, condensation, deposition, evaporation, sublimation, collection–coalescence, variable-density riming, shedding, ice multiplication, cloud ice aggregation, freezing and melting, and conversions between hydrometeor categories. 
@@ -94,6 +112,7 @@ Cloud concentration nuclei (CCN) concentration is predicted as in Mansell et al.
 
 Droplet activation option method is controlled by the 'irenuc' option (internal to NSSL module). Default (old) option (2) depletes CCN from unactivated CCN field. New option (5) instead counts the number of activated CCN (nucleated droplets) with the assumption of an initial constant CCN number mixing ratio. Option 5 better handles supersaturation at low droplet number concentration (e.g., maritime or high scavenging rates) concentrations by allowing extra droplet activation at high SS.
 
+```
   irenuc     : (nssl_mp_params namelist)
                2 = ccn field is UNactivated aerosol (default; old droplet activation)
                    Can switch to counting activated CCN with nssl_ccn_is_ccna=1
@@ -105,6 +124,7 @@ Droplet activation option method is controlled by the 'irenuc' option (internal 
                    If more strict limitation of activation is desired, use option 7.
                7 = ccn field must be ACTVIATED aerosol (new droplet activation) 
                    Must have nssl_ccn_on=1 for irenuc=7
+```
 
 Excessive size sorting (common in 2-moment schemes) is effectively controlled by an adaptive breakup method that prevents reflectivity growth by sedimentation (Mansell 2010). For 2-moment, infall=3 (default; nssl_mp_params namelist) is recommended. For 3-moment, infall only applies to droplets, cloud ice, and snow, since no corrections are needed for the 3-moment species (rain, graupel, hail).
 
@@ -112,14 +132,17 @@ Graupel -> hail conversion: The parameter ihlcnh selects the method of convertin
 
 June 2023 (WRF 4.5.x) update introduces changes in the default options for graupel/hail fall speeds and collection efficiencies. The original fall speed options (icdx=3; icdxhl=3) from Mansell et al. (2010) are switched to the Milbrandt and Morrison (2013) fall speed curves (icdx=6; icdxhl=6). Because the fall speeds are generally a bit lower, a partially compensating increase in maximum collection efficiency is set by default: ehw0/ehlw0 increased to 0.9. One effect is somewhat reduced total precipitation and cold pool intensity for supercell storms.
 
+```
   (nssl_mp_params namelist)
   icdx         - fall speed option for graupel (was 3, now is 6)
   icdxhl       - fall speed option for hail (was 3, now is 6)
   ehw0,ehlw0   - Maximim droplet collection efficiencies for graupel (ehw0=0.75, now 0.9)
                  and hail (ehlw0=0.75, now 0.9) 
+```
 
 In summary, to get something closer to previous behavior, use the following:
 
+```
 &nssl_mp_params
   icdx   = 3
   icdxhl = 3
@@ -127,21 +150,25 @@ In summary, to get something closer to previous behavior, use the following:
   ehlw0  = 0.75
   ihlcnh = 1
 /
+```
 
 ## Snow Aggregation and reflectivity:
 
 Snow self-collection (aggregation) has been curbed in the 4.5.x version by reducing the collision efficiency and the temperature range over which aggregation is allowed (esstem):
 
+```
   ess0 = 0.5 ! collision efficiency, reduced from 1 to 0.5
   esstem1 = -15. ! was -25.  ! lower temperature where snow aggregation turns on
   esstem2 = -10. ! was -20.  ! higher temperature for linear ramp of ess from zero at esstem1 to formula value at esstem2
-  
+```
+
   If desired, some further reduction in aggregation can be gained from setting iessopt=4, which reduces ess0 to 0.1 (80% reduction) in conditions of ice subsaturation (RHice < 100%).
   Snow reflectivity formerly had a default setting that turned on a crude bright band enhancement (iusewetsnow=1). This is now turned off by default (iusewetsnow=0)
   These snow parameters can be accessed through the nssl_mp_params namelist.
 
 ## WRF Legacy (obsolete) mp_physics options:
 
+```
  mp_physics 
   = 22 ! NSSL scheme (2-moment) without hail
       Equivalent: mp=18, nssl_hail_on=0, nssl_ccn_on=1
@@ -153,7 +180,7 @@ Snow self-collection (aggregation) has been curbed in the 4.5.x version by reduc
   = 21, NSSL 1-moment, (6-class), very similar to Gilmore et al. 2004
       Equivalent: mp=18, nssl_2moment_on=0, nssl_hail_on=0, nssl_ccn_on=0, 
       nssl_density_on=0
-
+```
 
 # References:
 
