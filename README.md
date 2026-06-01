@@ -105,7 +105,7 @@ To select NSSL in the physics namelist:
                  1.225/(air density at cloud base).
 ```
 
-## More background
+## More Info
 
 The graupel and hail particle densities are also calculated by predicting the total particle volume. The graupel category therefore emulates a range of characteristics from high-density frozen drops (includes small hail) to low-density graupel (from rimed ice crystals/snow) in its size and density spectrum. The hail category is designed to simulate larger hail sizes. Hail is only produced from higher-density large graupel that is actively riming (esp. in wet growth).
 
@@ -171,15 +171,17 @@ Snow self-collection (aggregation) has been curbed in the 4.5.x version by reduc
 
 ## WRF Legacy (obsolete) mp_physics options:
 
+Options for mp_physics that are deprecated but will set appropriate flags to yield the same effect
+
 ```
  mp_physics 
   = 22 ! NSSL scheme (2-moment) without hail
       Equivalent: mp=18, nssl_hail_on=0, nssl_ccn_on=1
   = 17 ! NSSL scheme (2-moment) with hail is now the same as mp=18
-      Equivalent: mp=18, nssl_ccn_on=1 <- must explicitly set nssl_ccn_on=0 to 
-      get old behavior
+      Equivalent: mp=18, nssl_ccn_on=1 <- must explicitly set nssl_ccn_on=0 in the
+       namelist to get old behavior
   = 19, NSSL 1-moment (7 class: qv,qc,qr,qi,qs,qg,qh; predicts graupel density)
-      Equivalent: mp=18, nssl_2moment_on=0, nssl_ccn_on=1 (do no set nssl_hail_on)
+      Equivalent: mp=18, nssl_2moment_on=0, nssl_ccn_on=0, nssl_hail_on = 2
   = 21, NSSL 1-moment, (6-class), very similar to Gilmore et al. 2004
       Equivalent: mp=18, nssl_2moment_on=0, nssl_hail_on=0, nssl_ccn_on=0, 
       nssl_density_on=0
