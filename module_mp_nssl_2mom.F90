@@ -2,7 +2,7 @@
 !!
 
 !---------------------------------------------------------------------
-! code snapshot: "Jun  1 2026" at "11:47:22"
+! code snapshot: "Jun  2 2026" at "10:18:22"
 !---------------------------------------------------------------------
 !>\ingroup mod_mp_nssl2m
 !! This module provides a 1/2/3-moment bulk microphysics scheme based on a combination of
@@ -5648,7 +5648,6 @@ END SUBROUTINE nssl_2mom_driver
              ELSE
                xvmax = xvmx(lr)
              ENDIF
-
              IF ( xvmn(lr) > xv ) THEN
                an(ix,jy,kz,lnr) = dn(ix,kz)*an(ix,jy,kz,lr)/(rho_qr*xvmn(lr))
              ELSEIF ( xv > xvmax ) THEN
@@ -8991,7 +8990,13 @@ END SUBROUTINE nssl_2mom_driver
 ! Code obtained from Lou Wicker, 30 August 2004
 ! Modified by David Dowell, 7 September 2004, after input from Matt Gilmore
 !
-! 5/2026: Adapted for MPAS for NSSL-MP only (ERM)
+!
+! 2005.07.18:  (erm) Added option for Ferrier (1994) version of dBZ 
+!             calculation, which uses equivalent melted diameter.
+!             Here it is assumed that all ice particles are dry, which 
+!             may not be realistic in that regard.
+!
+!             Also added dBZ calculation for 10-ice and 2-moment
 !
 !--------------------------------------------------------------------------
 !
@@ -9107,7 +9112,7 @@ END SUBROUTINE nssl_2mom_driver
                               qc, qr, qi, qs, qh, qhl,                  &
                               ccw, crw, cci, csw, chw, chl,             &
                               vhw, vhl, zrw, zhw, zhl,                  &
-                              pb, tb, rho_air, dbzout )
+                              pb, tb, rho_air, dbzout, no_dbz )
  
 ! ##############################################################################
       implicit none
@@ -9119,7 +9124,8 @@ END SUBROUTINE nssl_2mom_driver
       real, dimension(nz_in), intent(inout) :: ccw, crw, cci, csw, chw, chl
       real, dimension(nz_in), intent(inout) :: vhw, vhl, zrw, zhw, zhl
       real, dimension(nz_in), intent(in) :: pb, tb, rho_air
-      real, dimension(nz_in), intent(out) :: dbzout
+      real, dimension(nz_in), intent(out), optional :: dbzout
+      logical, optional :: no_dbz ! if true, then skip reflectivity
 
 !---  Local Variables
 
@@ -9131,9 +9137,14 @@ END SUBROUTINE nssl_2mom_driver
       real :: temk(1,1,nz_in)
       real :: dbz(1,1,nz_in)
       real :: xv, xmas, cx
+      logical :: no_dbz_local
 
 !-----------------------------------------------------------------------
 
+      no_dbz_local = .false.
+      IF ( present( no_dbz ) ) THEN
+        no_dbz_local = no_dbz
+      ENDIF
       an(:,:,:,:) = 0.0
       do k = 1, nz_in
         dn(1,1,k)   = rho_air(k)    ! 1.0e5*pb(k)**2.509/(287.04*tb(k))
@@ -9161,6 +9172,7 @@ END SUBROUTINE nssl_2mom_driver
 
       call calcnfromq(nx,ny,nz_in,an,na,nor,nor,dn,sizecheck_flag=.true.)
 
+      IF ( present( dbzout ) .and. .not. no_dbz_local ) THEN
       kediagloc = nz_in
       call radardd02(nx,ny,nz_in,nor,na,an,temk,                        &
      &    dbz,dn,1,cnoh,rho_qh,ipconc,kediagloc,0,                      &
@@ -9169,6 +9181,7 @@ END SUBROUTINE nssl_2mom_driver
       do k = 1, nz_in
         dbzout(k) = dbz(1,1,k)
       enddo
+      ENDIF
 
       do k = 1, nz_in
 !         dn(1,1,k)   = rho_air(k)    ! 1.0e5*pb(k)**2.509/(287.04*tb(k))
@@ -9195,86 +9208,6 @@ END SUBROUTINE nssl_2mom_driver
 
       END subroutine nssl_column_dbz
 
-
-!
-! ##############################################################################
-!
-! ######################################################################
-!
-!  nssl_column_dbz: column-level reflectivity (dBZ)
-!  Processes an entire column at once for efficiency, avoiding
-!  per-level overhead of nssl_qtodbz.
-!
-! ######################################################################
- 
-      subroutine nssl_column_dbz(nz_in,                                 &
-                              qc, qr, qi, qs, qh, qhl,                  &
-                              ccw, crw, cci, csw, chw, chl,             &
-                              vhw, vhl, zrw, zhw, zhl,                  &
-                              pb, tb, rho_air, dbzout )
- 
-! ##############################################################################
-      implicit none
-
-!---- Passed Variables
-
-      integer, intent(in) :: nz_in
-      real, dimension(nz_in), intent(in) :: qc, qr, qi, qs, qh, qhl
-      real, dimension(nz_in), intent(in) :: ccw, crw, cci, csw, chw, chl
-      real, dimension(nz_in), intent(in) :: vhw, vhl, zrw, zhw, zhl
-      real, dimension(nz_in), intent(in) :: pb, tb, rho_air
-      real, dimension(nz_in), intent(out) :: dbzout
-
-!---  Local Variables
-
-      integer, parameter :: nx = 1, ny = 1, nor = 0
-      integer :: k, kediagloc
-      real :: cnoh, rho_qh
-      real :: an(1,1,nz_in,na)
-      real :: dn(1,1,nz_in+1)
-      real :: temk(1,1,nz_in)
-      real :: dbz(1,1,nz_in)
-      real :: xv, xmas, cx
-
-!-----------------------------------------------------------------------
-
-      an(:,:,:,:) = 0.0
-      do k = 1, nz_in
-        dn(1,1,k)   = rho_air(k)    ! 1.0e5*pb(k)**2.509/(287.04*tb(k))
-        temk(1,1,k) = tb(k)*pb(k)
-
-        an(1,1,k,lc) = qc(k)
-        an(1,1,k,lr) = qr(k)
-        an(1,1,k,li) = qi(k)
-        an(1,1,k,ls) = qs(k)
-        an(1,1,k,lh) = qh(k)
-        IF ( lhl > 1 ) an(1,1,k,lhl) = qhl(k)
-        an(1,1,k,lnc) = rho_air(k)*ccw(k)
-        an(1,1,k,lnr) = rho_air(k)*crw(k)
-        an(1,1,k,lni) = rho_air(k)*cci(k)
-        an(1,1,k,lns) = rho_air(k)*csw(k)
-        an(1,1,k,lnh) = rho_air(k)*chw(k)
-        IF ( lnhl > 1 ) an(1,1,k,lnhl) = rho_air(k)*chl(k)
-        IF ( lvh > 1 )  an(1,1,k,lvh)  = rho_air(k)*vhw(k)
-        IF ( lvhl > 1 ) an(1,1,k,lvhl) = rho_air(k)*vhl(k)
-        IF ( lzr > 1 )  an(1,1,k,lzr)  = rho_air(k)*zrw(k)
-        IF ( lzh > 1 )  an(1,1,k,lzh)  = rho_air(k)*zhw(k)
-        IF ( lzhl > 1 ) an(1,1,k,lzhl) = rho_air(k)*zhl(k)
-      enddo
-      dn(1,1,nz_in+1) = dn(1,1,nz_in)
-
-      call calcnfromq(nx,ny,nz_in,an,na,nor,nor,dn,sizecheck_flag=.true.)
-
-      kediagloc = nz_in
-      call radardd02(nx,ny,nz_in,nor,na,an,temk,                        &
-     &    dbz,dn,1,cnoh,rho_qh,ipconc,kediagloc,0,                      &
-     &    zdbz_start=1,zdbz_end=nz_in)
-
-      do k = 1, nz_in
-        dbzout(k) = dbz(1,1,k)
-      enddo
-
-      END subroutine nssl_column_dbz
 
 ! #####################################################################
 ! #####################################################################
@@ -18077,7 +18010,6 @@ END SUBROUTINE nssl_2mom_driver
       if ( ipconc .ge. 4 ) then !
       do mgs = 1,ngscnt
       csacs(mgs) = 0.0
-      ec0(mgs) = 0.0
       IF ( qx(mgs,ls) > qxmin(ls) .and. ess(mgs) .gt. 0.0 ) THEN ! .and. xv(mgs,ls) < 0.25*xvmx(ls)*Max(1.,100./Min(100.,xdn(mgs,ls)))  ) THEN
 
         IF ( iessec0flag == 0 ) THEN
@@ -18120,7 +18052,7 @@ END SUBROUTINE nssl_2mom_driver
        cracw(mgs) = 0.0
        cracr(mgs) = 0.0
        zracr(mgs) = 0.0
-       ec0(mgs) = 0.0 ! 1.e9
+       ec0(mgs) = 1.e9
       IF ( qx(mgs,lc) .gt. qxmin(lc) .and. qx(mgs,lr) .gt. qxmin(lr)    &
      &      .and. qracw(mgs) .gt. 0.0 ) THEN
 
@@ -18252,10 +18184,6 @@ END SUBROUTINE nssl_2mom_driver
               ELSE
                 crbreak = Max( 0.0,  rainbreakfac*(1. - ec0(mgs))*(rho0(mgs)*qx(mgs,lr))**2 ) ! hand fit to lower range of wkqss output
               ENDIF
-!                 IF ( kgs(mgs) < 9 .and. qx(mgs,lr) > 3.e-3 ) THEN
-!                   write(0,*) 'i,k,qr,cr,crbrk,cracr,rho0,ec0 = ',igs(mgs),kgs(mgs),qx(mgs,lr),cx(mgs,lr),crbreak, &
-!                                cracr(mgs),rho0(mgs),ec0(mgs)
-!                 ENDIF
 !                crbreak = Max(0.0, -0.18 + 1.139e6 * (rho0(mgs)*qx(mgs,lr) + 0.00038106)**2)
                 cracr(mgs) = cracr(mgs) - crbreak ! cracr is subtracted, so negative value for breakup
        ELSEIF ( irainbreak == 11 .and. rho0(mgs)*qx(mgs,lr) > qrbrthresh1 .and. ipconc >= 5  ) THEN
@@ -22894,6 +22822,7 @@ END SUBROUTINE nssl_2mom_driver
      &  +crcev(mgs)   &
      &  - Max(0.0,cracr(mgs))
 !     >  -il5(mgs)*ciracr(mgs)
+
       ELSEIF ( warmonly < 0.8 ) THEN
        pcrwi(mgs) = &
      &   crcnw(mgs)   &
@@ -22923,7 +22852,6 @@ END SUBROUTINE nssl_2mom_driver
 !        qrcnw(mgs) = 0.0
 
       ENDIF
-
 
 
       frac = 0.0
@@ -24223,7 +24151,6 @@ END SUBROUTINE nssl_2mom_driver
 
          pzrwd(mgs) = Min(0.0,zracr(mgs))   &
      &   +  Min(0.,zrcev(mgs) )  &
-     &   +  Min(0.0,zracr(mgs))  &
      &    - zrach(mgs)  &
      &    - zrachl(mgs)  &
      &    - zrfrz(mgs)  &
