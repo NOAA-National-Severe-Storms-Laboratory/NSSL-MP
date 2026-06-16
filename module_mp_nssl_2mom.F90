@@ -2,10 +2,9 @@
 !!
 
 !---------------------------------------------------------------------
-! code snapshot: "Jun  2 2026" at "10:18:22"
+! code snapshot: "Jun 15 2026" at "10:49:08"
 !---------------------------------------------------------------------
-!>\ingroup mod_mp_nssl2m
-!! This module provides a 1/2/3-moment bulk microphysics scheme based on a combination of
+!> This module provides a 1/2/3-moment bulk microphysics scheme based on a combination of
 !! Straka and Mansell (2005, JAM) and Zeigler (1985, JAS) and modified/upgraded in
 !! in Mansell, Zeigler, and Bruning (2010, JAS).  Two-moment adaptive sedimentation
 !! follows Mansell (2010, JAS), using parameter infall = 4.
@@ -188,6 +187,7 @@ MODULE module_mp_nssl_2mom
   private gamma_dp, gamxinfdp, gamma_dpr
   private delbk, delabk
   private gammadp
+  private galpha, dgalpha
   private zraten,zrateq,zrateqn
   
   logical, private :: cleardiag = .false.
@@ -225,7 +225,7 @@ MODULE module_mp_nssl_2mom
   integer  :: iusewethail = 0 ! =1 to turn on use of QHW for graupel reflectivity (only for ZVDM -- mixedphase)
   integer  :: iusewetsnow = 0 ! =1 to turn on diagnosed bright band; =2 'old' snow reflectivity (dry), =3 'old' snow dbz + brightband
   integer,private  :: icorrecthaildbz = -1 ! =1 to adjust hail number conc. from gr->hl conversion to keep correct Z
-  integer,private  :: icorrectfddbz = 0 ! =1 to adjust graupel/FD number conc. from rain freezing to keep correct Z
+  integer,private  :: icorrectfddbz = -1 ! =1 to adjust graupel/FD number conc. from rain freezing to keep correct Z
   real   ,private  :: zxmincorr = 1.e-15 ! minimum Z to run correction to C
   real   ,private  :: cxmincorr = 1.e-3 ! minimum C to run correction to C
 ! microphysics
@@ -479,7 +479,7 @@ MODULE module_mp_nssl_2mom
   real   , private :: rz          ! reflectivity conservation factor for graupel/rain
                          ! now calculated in icezvd_dr.F from alphah and rnu
                          ! currently only used for graupel melting to rain
-  real   , private :: rzhl        ! reflectivity conservation factor for hail/rain
+  real   , private :: rzhl, rzhlh ! reflectivity conservation factor for hail/rain, hail/graupel
                          ! now calculated in icezvd_dr.F from alphahl and rnu
 
   real   , private :: rzs     ! reflectivity conservation factor for snow(imusnow=3) with rain (imurain=1)
@@ -1349,6 +1349,8 @@ MODULE module_mp_nssl_2mom
   character(len=strsize), intent(in), optional :: namelist_filename
   character(len=strsize) :: namelist_inputfile
   logical  :: read_internal = .false.
+  logical  :: file_exist = .false.
+  logical  :: is_initialized = .false.
 
    ! CCPP error handling
    character(len=*), intent(  out) :: errmsg
@@ -1386,7 +1388,10 @@ MODULE module_mp_nssl_2mom
 
       real :: alpjj, alpii, xnuii, xnujj
       integer :: ii, jj
-     
+
+     IF ( is_initialized ) RETURN
+     is_initialized = .true.
+
 
      errmsg = ''
      errflg = 0
@@ -1530,24 +1535,6 @@ MODULE module_mp_nssl_2mom
       rewind(15)
       read(15,NML=nssl_mp_params,iostat=istat)
       close(15)
-      IF ( present( nssl_icenucopt ) ) THEN
-        icenucopt = nssl_icenucopt
-      ENDIF
-!! #endif /* internal_file_nml */
-      IF ( present ( myrank ) .and. present ( mpiroot ) ) THEN
-        IF ( myrank == mpiroot ) THEN
-         IF ( istat /= 0 ) THEN
-           write(0,*) 'NSSL_2MOM_INIT: PROBLEM WITH NSSL_MP_PARAMS namelist: not found or bad token'
-         ENDIF
-
-!         write(0,*) 'iusewetsnow = ',iusewetsnow
-
-         open(15,file='nssl_mp_params.out',status='unknown',form='formatted')
-         write(15,NML=nssl_mp_params)
-         close(15)
-         ENDIF
-       ENDIF
-       ENDIF
 
     ! turn on active rain breakup by default for 3-moment rain since it has no implicit breakup from sedimentation
     ! Check this after namelist read so that user can set irainbreak=0 to turn off
@@ -1567,9 +1554,39 @@ MODULE module_mp_nssl_2mom
       ENDIF
     ENDIF
 
+      IF ( icorrectfddbz == -1 ) THEN
+        IF ( ipconc >= 6 ) THEN
+          icorrectfddbz = 0
+        ELSE
+          icorrectfddbz = 1
+        ENDIF
+      ENDIF
+
       IF ( present( nssl_icenucopt ) ) THEN
         icenucopt = nssl_icenucopt
       ENDIF
+
+!! #endif /* internal_file_nml */
+      IF ( present ( myrank ) .and. present ( mpiroot ) ) THEN
+        IF ( myrank == mpiroot ) THEN
+         IF ( istat /= 0 ) THEN
+           write(0,*) 'NSSL_2MOM_INIT: PROBLEM WITH NSSL_MP_PARAMS namelist: not found or bad token'
+         ENDIF
+
+!         write(0,*) 'iusewetsnow = ',iusewetsnow
+
+         inquire(file='namelist.output', exist=file_exist) ! check for WRF standard namelist output
+         IF ( file_exist ) THEN
+           open(15,file='namelist.output',status='old',action='readwrite', position='append',form='formatted')
+         ELSE
+           open(15,file='nssl_mp_params.out',status='unknown',form='formatted')
+         ENDIF
+         write(15,NML=nssl_mp_params)
+         close(15)
+         ENDIF ! rank=0
+       ENDIF
+       ENDIF
+
 
       IF ( iufccn > 0 ) THEN ! make sure to use option that uses UF ccn
         irenuc = 7
@@ -2139,10 +2156,10 @@ MODULE module_mp_nssl_2mom
       ELSE ! rain is gamma of diameter
       
       rz =  ((4. + alphah)*(5. + alphah)*(6. + alphah)*(1. + alphar)*(2. + alphar)*(3. + alphar))/ & 
-     &  ((1 + alphah)*(2 + alphah)*(3 + alphah)*(4. + alphar)*(5. + alphar)*(6. + alphar))
+     &  ((1. + alphah)*(2. + alphah)*(3. + alphah)*(4. + alphar)*(5. + alphar)*(6. + alphar))
       
       rzhl =  ((4. + alphahl)*(5. + alphahl)*(6. + alphahl)*(1. + alphar)*(2. + alphar)*(3. + alphar))/ & 
-     &  ((1 + alphahl)*(2 + alphahl)*(3 + alphahl)*(4. + alphar)*(5. + alphar)*(6. + alphar))
+     &  ((1. + alphahl)*(2. + alphahl)*(3. + alphahl)*(4. + alphar)*(5. + alphar)*(6. + alphar))
 
       
       rzs =   & 
@@ -2151,6 +2168,9 @@ MODULE module_mp_nssl_2mom
        
 
       ENDIF
+
+      rzhlh =  ((4. + alphahl)*(5. + alphahl)*(6. + alphahl)*(1. + alphah)*(2. + alphah)*(3. + alphah))/ & 
+     &  ((1. + alphahl)*(2. + alphahl)*(3. + alphahl)*(4. + alphah)*(5. + alphah)*(6. + alphah))
 
       IF ( ipconc <= 5 ) THEN 
         imltshddmr = Min(1, imltshddmr)
@@ -14309,7 +14329,6 @@ END SUBROUTINE nssl_2mom_driver
 
 
 ! inline functions for Newton method
-       real :: galpha, dgalpha
        real :: a_in
        logical, parameter :: newton = .false.
 
@@ -15068,7 +15087,11 @@ END SUBROUTINE nssl_2mom_driver
        if ( ndebug .gt. 0 .and. my_rank>=0 ) write(0,*) my_rank,  'ICEZVD_GS: dbg = set rz'
 
         IF ( lzh < 1 .or. lzhl < 1 ) THEN
-          rzxhlh(:) = rzhl/rz
+          IF ( icorrecthaildbz == 0 ) THEN
+            rzxhlh(:) = rzhlh
+          ELSE
+            rzxhlh(:) = 1.0 ! correction already accounts for difference in shape param
+          ENDIF
         ELSEIF ( lzh > 1 .and. lzhl > 1 ) THEN
           rzxhlh(:) = 1.
         ENDIF
@@ -18821,15 +18844,15 @@ END SUBROUTINE nssl_2mom_driver
               zrfrz(mgs) = zxd1*dtpinv
               ! tmp4 is the Z from the converted particles assuming shape of alphamax
               IF ( icorrectfddbz >= 1 .and. zxd1 > zxmincorr .and. cxd1 > cxmincorr ) THEN
-              IF ( .true. ) THEN
+               IF ( icorrectfddbz == 1 ) THEN !{
                ! tmp3 is cx that is consistent with increased q and Z
           !   g1x(mgs,lhl) = (pi*xdn(mgs,lhl))**2*zx(mgs,lhl)*cx(mgs,lhl)/((6.*rho0(mgs)*qx(mgs,lhl))**2)
                il = lh
-               IF ( lf > 0 ) il = lf
-               tmp3 = g1x(mgs,il)*(rho0(mgs)*(qx(mgs,il)+qxd1))**2/((pi*xdn(mgs,il)/6.0)**2*(zx(mgs,il)+zxd1) )
-               crfrzf(mgs) = dtpinv*Max(0.0, tmp3 - cx(mgs,il) )
+                IF ( lf > 0 ) il = lf
+                tmp3 = g1x(mgs,il)*(rho0(mgs)*(qx(mgs,il)+qxd1))**2/((pi*xdn(mgs,il)/6.0)**2*(zx(mgs,il)+zxd1) )
+                crfrzf(mgs) = dtpinv*Max(0.0, tmp3 - cx(mgs,il) )
               
-              ELSE ! old version (not robust)
+               ELSEIF ( icorrectfddbz > 1 ) THEN ! old version (not robust)
               tmp3 = g1xmax*(rho0(mgs)*qxd1)**2/((pi*rhofrz/6.0)**2)
               tmp4 = tmp3/cxd1
               IF ( tmp4 > zxd1 ) THEN ! calculate new graupel/fd number to match zxd1
@@ -18838,26 +18861,28 @@ END SUBROUTINE nssl_2mom_driver
                 cxd1 = tmp3/zxd1
                 crfrzf(mgs) = dtpinv*cxd1
               ENDIF
-              ENDIF
+              ENDIF !}
               ENDIF
             ELSE
               IF ( icorrectfddbz >= 1 ) THEN
               tmp5 = g1x(mgs,lr)*(rho0(mgs)*qx(mgs,lr))**2/((pi*xdn(mgs,lr)/6.)**2*cx(mgs,lr))
               zxd1 = (tmp1 + dely*dqiacralphainv*(tmp2 - tmp1))*tmp5 ! reflectivity transfer from rain
-              IF ( zxd1 > zxmincorr .and. cxd1 > cxmincorr  ) THEN
+              IF ( icorrectfddbz == 1 ) THEN
+               IF ( zxd1 > zxmincorr .and. cxd1 > cxmincorr  ) THEN
                ! tmp3 is cx that is consistent with increased q and Z
           !   g1x(mgs,lhl) = (pi*xdn(mgs,lhl))**2*zx(mgs,lhl)*cx(mgs,lhl)/((6.*rho0(mgs)*qx(mgs,lhl))**2)
-               il = lh
-               IF ( lf > 0 ) il = lf
-               IF ( cx(mgs,il) > cxmin ) THEN
-               ! graupel/fd reflectivity
-                 tmp = g1x(mgs,il)*(rho0(mgs)*qx(mgs,il))**2/((pi*xdn(mgs,il)/6.)**2*cx(mgs,il))
-               ELSE
-                 tmp = 0.
+                il = lh
+                IF ( lf > 0 ) il = lf
+                IF ( cx(mgs,il) > cxmin ) THEN
+                ! graupel/fd reflectivity
+                  tmp = g1x(mgs,il)*(rho0(mgs)*qx(mgs,il))**2/((pi*xdn(mgs,il)/6.)**2*cx(mgs,il))
+                ELSE
+                  tmp = 0.
+                ENDIF
+                tmp3 = g1x(mgs,il)*(rho0(mgs)*(qx(mgs,il)+qxd1))**2/((pi*xdn(mgs,il)/6.0)**2*(tmp+zxd1) )
+                crfrzf(mgs) = dtpinv*Max(0.0, tmp3 - cx(mgs,il) )
                ENDIF
-               tmp3 = g1x(mgs,il)*(rho0(mgs)*(qx(mgs,il)+qxd1))**2/((pi*xdn(mgs,il)/6.0)**2*(tmp+zxd1) )
-               crfrzf(mgs) = dtpinv*Max(0.0, tmp3 - cx(mgs,il) )
-              ELSEIF ( .false. ) THEN ! old version
+              ELSEIF ( icorrectfddbz > 1 ) THEN ! old version
             ! tmp5 is rain reflectivity moment
             ! tmp4 is the reflectivity of the newly-converted graupel particles (use g1x(lh) for loss term)
             ! which we want to match zxd1 to prevent spurious increase in total reflectivity
@@ -18983,7 +19008,16 @@ END SUBROUTINE nssl_2mom_driver
               ! Do the correction for alphamax
               zrfrz(mgs) = zxd1*dtpinv
               ! tmp4 is the Z from the converted particles assuming shape of alphamax
-              IF ( icorrectfddbz >= 2  .and. zxd1 > zxmincorr .and. cxd1 > cxmincorr ) THEN
+              IF ( icorrectfddbz >= 1  .and. zxd1 > zxmincorr .and. cxd1 > cxmincorr ) THEN
+              IF ( icorrectfddbz == 1 ) THEN
+               ! tmp3 is cx that is consistent with increased q and Z
+          !   g1x(mgs,lhl) = (pi*xdn(mgs,lhl))**2*zx(mgs,lhl)*cx(mgs,lhl)/((6.*rho0(mgs)*qx(mgs,lhl))**2)
+               il = lh
+               IF ( lf > 0 ) il = lf
+               tmp3 = g1x(mgs,il)*(rho0(mgs)*(qx(mgs,il)+qxd1))**2/((pi*xdn(mgs,il)/6.0)**2*(zx(mgs,il)+zxd1) )
+               crfrzf(mgs) = dtpinv*Max(0.0, tmp3 - cx(mgs,il) )
+              
+              ELSE ! old version (not robust)
               tmp3 = g1xmax*(rho0(mgs)*qxd1)**2/((pi*rhofrz/6.0)**2)
               tmp4 = tmp3/cxd1
               IF ( tmp4 > zxd1 ) THEN ! calculate new graupel/fd number to match zxd1
@@ -18992,9 +19026,28 @@ END SUBROUTINE nssl_2mom_driver
                 cxd1 = tmp3/zxd1
                 crfrzf(mgs) = dtpinv*cxd1
               ENDIF
+              ENDIF ! t/f
               ENDIF
             ELSE ! }{
-              IF ( icorrectfddbz >= 2  ) THEN
+              IF ( icorrectfddbz >= 1 ) THEN
+              tmp5 = g1x(mgs,lr)*(rho0(mgs)*qx(mgs,lr))**2/((pi*xdn(mgs,lr)/6.)**2*cx(mgs,lr))
+              zxd1 = (tmp1 + dely*dqiacralphainv*(tmp2 - tmp1))*tmp5 ! reflectivity transfer from rain
+              IF ( icorrectfddbz == 1 ) THEN
+              IF ( zxd1 > zxmincorr .and. cxd1 > cxmincorr  ) THEN
+               ! tmp3 is cx that is consistent with increased q and Z
+          !   g1x(mgs,lhl) = (pi*xdn(mgs,lhl))**2*zx(mgs,lhl)*cx(mgs,lhl)/((6.*rho0(mgs)*qx(mgs,lhl))**2)
+               il = lh
+               IF ( lf > 0 ) il = lf
+               IF ( cx(mgs,il) > cxmin ) THEN
+               ! graupel/fd reflectivity
+                 tmp = g1x(mgs,il)*(rho0(mgs)*qx(mgs,il))**2/((pi*xdn(mgs,il)/6.)**2*cx(mgs,il))
+               ELSE
+                 tmp = 0.
+               ENDIF
+               tmp3 = g1x(mgs,il)*(rho0(mgs)*(qx(mgs,il)+qxd1))**2/((pi*xdn(mgs,il)/6.0)**2*(tmp+zxd1) )
+               crfrzf(mgs) = dtpinv*Max(0.0, tmp3 - cx(mgs,il) )
+               ENDIF
+              ELSEIF ( icorrectfddbz  > 1 ) THEN ! old version
             ! tmp5 is rain reflectivity moment
               tmp5 = g1x(mgs,lr)*(rho0(mgs)*qx(mgs,lr))**2/((pi*xdn(mgs,lr)/6.)**2*cx(mgs,lr))
               zxd1 = (tmp1 + dely*dqiacralphainv*(tmp2 - tmp1))*tmp5
@@ -19005,6 +19058,7 @@ END SUBROUTINE nssl_2mom_driver
               tmp4 = tmp3/cxd1
               IF ( tmp4 > zxd1 ) THEN ! calculate new FD number to match zxd1
                 crfrzf(mgs) = tmp3/zxd1*dtpinv
+              ENDIF
               ENDIF
               ENDIF
               ENDIF
@@ -22495,7 +22549,7 @@ END SUBROUTINE nssl_2mom_driver
 !
       IF ( inactopt >= 2 ) THEN ! IN are freezing droplets (immersion); need to expand to rain
 !         IF ( cx(mgs,lc) > 0. ) THEN
-           ! check overdepletion and rescale if needed
+           ! check overdepletion of droplets and rescale if needed
            IF (  ciint(mgs) + cidint(mgs) > cx(mgs,lc)*dtpinv ) THEN
              fac = cx(mgs,lc)*dtpinv / ( ciint(mgs) + cidint(mgs) )
              ciint(mgs) = fac*ciint(mgs)
